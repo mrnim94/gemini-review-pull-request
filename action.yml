@@ -1,0 +1,19 @@
+name: "Gemini AI Code Reviewer"
+description: "Automated code reviews using Gemini AI."
+author: "Nimtechnology"
+
+inputs:
+  github_token:
+    description: "GitHub token for authenticating API requests."
+    required: true
+  gemini_api_key:
+    description: "API key for accessing Gemini AI."
+    required: true
+
+runs:
+  using: "docker"
+  image: "Dockerfile"
+
+branding:
+  icon: "check-circle"
+  color: "blue"
