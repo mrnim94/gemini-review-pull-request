@@ -1,28 +1,27 @@
-# Use the official Golang image to build the application
+# Build stage
 FROM golang:1.20 as builder
 
 # Set the working directory
 WORKDIR /app
 
-# Copy go mod files and download dependencies
-#COPY go.mod go.sum ./
+# Copy go.mod and go.sum files and download dependencies
 COPY go.mod ./
 RUN go mod download
 
-# Copy source code
+# Copy the rest of the source code
 COPY . .
 
-# Build the binary
-RUN go build -o action .
+# Build the Go application
+RUN go build -o /action .
 
-# Use a minimal image for the final build
+# Final stage
 FROM alpine:latest
 
 # Set the working directory
 WORKDIR /root/
 
-# Copy the binary from the builder
-COPY --from=builder /app/action .
+# Copy the compiled binary from the builder
+COPY --from=builder /action .
 
-# Entry point
+# Set the entry point to the Go binary
 ENTRYPOINT ["./action"]
