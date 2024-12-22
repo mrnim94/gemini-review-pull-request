@@ -38,10 +38,10 @@ func getPRDetails() (*PRDetails, error) {
 	return &details, nil
 }
 
-func getDiff(owner, repo string, pullNumber int) (string, error) {
+func getDiff(owner, repo string, pullNumber int, githubToken string) (string, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls/%d", owner, repo, pullNumber)
 	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("Authorization", "Bearer "+os.Getenv("GITHUB_TOKEN"))
+	req.Header.Set("Authorization", "Bearer "+githubToken)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -58,7 +58,7 @@ func getDiff(owner, repo string, pullNumber int) (string, error) {
 	return string(body), nil
 }
 
-func analyzeCode(diff, title, description string) ([]Comment, error) {
+func analyzeCode(diff, title, description, geminiApiKey string) ([]Comment, error) {
 	prompt := fmt.Sprintf(
 		"Review and improve the following code:\n\nTitle: %s\nDescription: %s\nDiff:\n%s\n\nTasks:\n1. Review the code and provide suggestions.\n2. Identify areas to improve the code's structure and robustness.\n3. Highlight potential security issues and suggest fixes.",
 		title, description, diff)
@@ -70,7 +70,7 @@ func analyzeCode(diff, title, description string) ([]Comment, error) {
 	})
 
 	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(requestBody))
-	req.Header.Set("Authorization", "Bearer "+os.Getenv("GEMINI_API_KEY"))
+	req.Header.Set("Authorization", "Bearer "+geminiApiKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{}
@@ -91,7 +91,7 @@ func analyzeCode(diff, title, description string) ([]Comment, error) {
 	return aiResponse.Comments, nil
 }
 
-func postReviewComments(owner, repo string, pullNumber int, comments []Comment) error {
+func postReviewComments(owner, repo string, pullNumber int, comments []Comment, githubToken string) error {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls/%d/reviews", owner, repo, pullNumber)
 	requestBody, _ := json.Marshal(map[string]interface{}{
 		"body":     "Automated review by Gemini AI",
@@ -100,7 +100,7 @@ func postReviewComments(owner, repo string, pullNumber int, comments []Comment) 
 	})
 
 	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(requestBody))
-	req.Header.Set("Authorization", "Bearer "+os.Getenv("GITHUB_TOKEN"))
+	req.Header.Set("Authorization", "Bearer "+githubToken)
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{}
@@ -119,25 +119,33 @@ func postReviewComments(owner, repo string, pullNumber int, comments []Comment) 
 }
 
 func main() {
+	githubToken := os.Getenv("INPUT_GITHUB_TOKEN")
+	geminiApiKey := os.Getenv("INPUT_GEMINI_API_KEY")
+
+	if githubToken == "" || geminiApiKey == "" {
+		fmt.Println("Error: Missing required inputs GITHUB_TOKEN or GEMINI_API_KEY.")
+		return
+	}
+
 	prDetails, err := getPRDetails()
 	if err != nil {
 		fmt.Println("Error fetching PR details:", err)
 		return
 	}
 
-	diff, err := getDiff(prDetails.Owner, prDetails.Repo, prDetails.PullNumber)
+	diff, err := getDiff(prDetails.Owner, prDetails.Repo, prDetails.PullNumber, githubToken)
 	if err != nil {
 		fmt.Println("Error fetching diff:", err)
 		return
 	}
 
-	comments, err := analyzeCode(diff, prDetails.Title, prDetails.Description)
+	comments, err := analyzeCode(diff, prDetails.Title, prDetails.Description, geminiApiKey)
 	if err != nil {
 		fmt.Println("Error analyzing code:", err)
 		return
 	}
 
-	err = postReviewComments(prDetails.Owner, prDetails.Repo, prDetails.PullNumber, comments)
+	err = postReviewComments(prDetails.Owner, prDetails.Repo, prDetails.PullNumber, comments, githubToken)
 	if err != nil {
 		fmt.Println("Error posting comments:", err)
 		return
