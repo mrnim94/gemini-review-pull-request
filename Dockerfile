@@ -1,27 +1,15 @@
-# Build stage
-FROM golang:1.23 as builder
+# Dockerfile
+FROM golang:1.23-alpine AS builder
 
-# Set the working directory
 WORKDIR /app
 
-# Copy go.mod and go.sum files and download dependencies
-COPY go.mod ./
-RUN go mod download
-
-# Copy the rest of the source code
+# Copy and build the Go application
 COPY . .
+RUN go build -o /action main.go
 
-# Build the Go application
-RUN go build -o /action .
-
-# Final stage
+# Use a minimal base image
 FROM alpine:latest
+COPY --from=builder /action /action
 
-# Set the working directory
-WORKDIR /root/
-
-# Copy the compiled binary from the builder
-COPY --from=builder /action .
-
-# Set the entry point to the Go binary
-ENTRYPOINT ["./action"]
+# Set the entrypoint
+ENTRYPOINT ["/action"]
