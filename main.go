@@ -7,6 +7,8 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+
+	"github.com/gemini-ai/gemini-sdk-go/gemini"
 )
 
 type PRDetails struct {
@@ -58,37 +60,34 @@ func getDiff(owner, repo string, pullNumber int, githubToken string) (string, er
 	return string(body), nil
 }
 
-func analyzeCode(diff, title, description, geminiApiKey string) ([]Comment, error) {
-	prompt := fmt.Sprintf(
-		"Review and improve the following code:\n\nTitle: %s\nDescription: %s\nDiff:\n%s\n\nTasks:\n1. Review the code and provide suggestions.\n2. Identify areas to improve the code's structure and robustness.\n3. Highlight potential security issues and suggest fixes.",
-		title, description, diff)
-
-	url := "https://gemini.api/endpoint"
-
-	requestBody, _ := json.Marshal(map[string]string{
-		"prompt": prompt,
-	})
-
-	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(requestBody))
-	req.Header.Set("Authorization", "Bearer "+geminiApiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
+func analyzeCodeUsingGemini(diff, title, description, geminiApiKey string) ([]Comment, error) {
+	client := gemini.NewClient(geminiApiKey)
+	analysisRequest := &gemini.AnalysisRequest{
+		Title:       title,
+		Description: description,
+		Diff:        diff,
+		Tasks: []string{
+			"Refactor the code for better structure and readability.",
+			"Suggest improvements to enhance performance and maintainability.",
+			"Inspect for CVEs and other potential security vulnerabilities. Provide fixes if necessary.",
+		},
 	}
-	defer resp.Body.Close()
 
-	var aiResponse struct {
-		Comments []Comment `json:"comments"`
-	}
-	err = json.NewDecoder(resp.Body).Decode(&aiResponse)
+	analysisResponse, err := client.AnalyzeCode(analysisRequest)
 	if err != nil {
 		return nil, err
 	}
 
-	return aiResponse.Comments, nil
+	var comments []Comment
+	for _, feedback := range analysisResponse.Feedbacks {
+		comments = append(comments, Comment{
+			Path:     feedback.Path,
+			Position: feedback.Position,
+			Body:     feedback.Comment,
+		})
+	}
+
+	return comments, nil
 }
 
 func postReviewComments(owner, repo string, pullNumber int, comments []Comment, githubToken string) error {
@@ -123,7 +122,7 @@ func main() {
 	geminiApiKey := os.Getenv("INPUT_GEMINI_API_KEY")
 
 	if githubToken == "" || geminiApiKey == "" {
-		fmt.Println("Error: Missing required inputs GITHUB_TOKEN or GEMINI_API_KEY.")
+		fmt.Println("Error: Missing required inputs INPUT_GITHUB_TOKEN or INPUT_GEMINI_API_KEY.")
 		return
 	}
 
@@ -139,7 +138,7 @@ func main() {
 		return
 	}
 
-	comments, err := analyzeCode(diff, prDetails.Title, prDetails.Description, geminiApiKey)
+	comments, err := analyzeCodeUsingGemini(diff, prDetails.Title, prDetails.Description, geminiApiKey)
 	if err != nil {
 		fmt.Println("Error analyzing code:", err)
 		return
