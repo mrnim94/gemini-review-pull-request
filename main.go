@@ -240,29 +240,31 @@ func main() {
 		return
 	}
 
-	diff, err := getDiff(prDetails.Owner, prDetails.Repo, prDetails.PullNumber, githubToken)
-	if err != nil {
-		fmt.Println("Error fetching diff:", err)
-		return
-	}
+	fmt.Println(prDetails)
 
-	parsedFiles, err := parseDiff(diff)
-	if err != nil {
-		fmt.Println("Error parsing diff:", err)
-		return
-	}
-
-	comments, err := analyzeCodeUsingGemini(parsedFiles, prDetails.Title, prDetails.Description, geminiApiKey)
-	if err != nil {
-		fmt.Println("Error analyzing code:", err)
-		return
-	}
-
-	err = postReviewComments(prDetails.Owner, prDetails.Repo, prDetails.PullNumber, comments, githubToken)
-	if err != nil {
-		fmt.Println("Error posting comments:", err)
-		return
-	}
-
-	fmt.Println("Review comments posted successfully.")
+	//diff, err := getDiff(prDetails.Owner, prDetails.Repo, prDetails.PullNumber, githubToken)
+	//if err != nil {
+	//	fmt.Println("Error fetching diff:", err)
+	//	return
+	//}
+	//
+	//parsedFiles, err := parseDiff(diff)
+	//if err != nil {
+	//	fmt.Println("Error parsing diff:", err)
+	//	return
+	//}
+	//
+	//comments, err := analyzeCodeUsingGemini(parsedFiles, prDetails.Title, prDetails.Description, geminiApiKey)
+	//if err != nil {
+	//	fmt.Println("Error analyzing code:", err)
+	//	return
+	//}
+	//
+	//err = postReviewComments(prDetails.Owner, prDetails.Repo, prDetails.PullNumber, comments, githubToken)
+	//if err != nil {
+	//	fmt.Println("Error posting comments:", err)
+	//	return
+	//}
+	//
+	//fmt.Println("Review comments posted successfully.")
 }
