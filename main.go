@@ -135,6 +135,32 @@ func getPRTitleAndDescription(eventData map[string]interface{}) (string, string)
 	return "No Title", "No Description"
 }
 
+// Helper function to load event data from the GITHUB_EVENT_PATH
+func loadEventData() (map[string]interface{}, error) {
+	eventPath := os.Getenv("GITHUB_EVENT_PATH")
+	if eventPath == "" {
+		return nil, fmt.Errorf("GITHUB_EVENT_PATH environment variable is not set")
+	}
+
+	file, err := os.Open(eventPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open event file: %v", err)
+	}
+	defer file.Close()
+
+	var eventData map[string]interface{}
+	if err := json.NewDecoder(file).Decode(&eventData); err != nil {
+		return nil, fmt.Errorf("failed to decode JSON from event file: %v", err)
+	}
+
+	return eventData, nil
+}
+
+// Helper function to get the GITHUB_EVENT_NAME environment variable
+func getEventName() string {
+	return os.Getenv("GITHUB_EVENT_NAME")
+}
+
 //func getDiff(owner, repo string, pullNumber int, githubToken string) (string, error) {
 //	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls/%d", owner, repo, pullNumber)
 //	req, _ := http.NewRequest("GET", url, nil)
@@ -322,6 +348,23 @@ func main() {
 	}
 
 	fmt.Printf("PR Details: %+v\n", prDetails)
+
+	// Load the event data
+	eventData, err := loadEventData()
+	if err != nil {
+		fmt.Printf("Error loading event data: %v\n", err)
+		return
+	}
+
+	// Get the event name
+	eventName := getEventName()
+	if eventName == "" {
+		fmt.Println("GITHUB_EVENT_NAME is not set")
+		return
+	}
+
+	fmt.Printf("Event Name: %s\n", eventName)
+	fmt.Printf("Event Data: %+v\n", eventData)
 
 	//diff, err := getDiff(prDetails.Owner, prDetails.Repo, prDetails.PullNumber, githubToken)
 	//if err != nil {
