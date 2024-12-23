@@ -4,23 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"strings"
-
-	"github.com/google/generative-ai-go/genai"
-	"google.golang.org/api/option"
 )
-
-type PRDetails struct {
-	Owner       string `json:"owner"`
-	Repo        string `json:"repo"`
-	PullNumber  int    `json:"pull_number"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-}
 
 type Comment struct {
 	Path     string `json:"path"`
@@ -39,19 +29,114 @@ type ParsedFile struct {
 	Hunks []Hunk
 }
 
-func getPRDetails() (*PRDetails, error) {
-	eventPayload, err := os.ReadFile(os.Getenv("GITHUB_EVENT_PATH"))
+// PRDetails struct to hold pull request details
+type PRDetails struct {
+	Owner       string
+	Repo        string
+	PullNumber  int
+	Title       string
+	Description string
+}
+
+// GetPRDetails retrieves details of the pull request from GitHub Actions event payload
+func GetPRDetails() (*PRDetails, error) {
+	// Get the path to the GitHub event file
+	eventPath := os.Getenv("GITHUB_EVENT_PATH")
+	if eventPath == "" {
+		return nil, errors.New("GITHUB_EVENT_PATH environment variable is not set")
+	}
+
+	// Open and read the event file
+	file, err := os.Open(eventPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open event file: %v", err)
+	}
+	defer file.Close()
+
+	var eventData map[string]interface{}
+	if err := json.NewDecoder(file).Decode(&eventData); err != nil {
+		return nil, fmt.Errorf("failed to decode JSON from event file: %v", err)
+	}
+
+	// Determine if the event was triggered by a comment on a PR or a direct PR event
+	var pullNumber int
+	var repoFullName string
+
+	if issue, ok := eventData["issue"].(map[string]interface{}); ok {
+		if prData, exists := issue["pull_request"].(map[string]interface{}); exists && prData != nil {
+			// For comment triggers
+			if number, ok := issue["number"].(float64); ok {
+				pullNumber = int(number)
+			} else {
+				return nil, errors.New("invalid pull request number in issue payload")
+			}
+		} else {
+			return nil, errors.New("issue payload does not contain pull_request data")
+		}
+		repoFullName = getRepoFullName(eventData)
+	} else {
+		// For direct PR events
+		if number, ok := eventData["number"].(float64); ok {
+			pullNumber = int(number)
+		} else {
+			return nil, errors.New("invalid pull request number in event payload")
+		}
+		repoFullName = getRepoFullName(eventData)
+	}
+
+	if repoFullName == "" {
+		return nil, errors.New("repository full name not found in event data")
+	}
+
+	owner, repo, err := splitRepoFullName(repoFullName)
 	if err != nil {
 		return nil, err
 	}
 
-	var details PRDetails
-	err = json.Unmarshal(eventPayload, &details)
-	if err != nil {
-		return nil, err
-	}
+	title, description := getPRTitleAndDescription(eventData)
 
-	return &details, nil
+	return &PRDetails{
+		Owner:       owner,
+		Repo:        repo,
+		PullNumber:  pullNumber,
+		Title:       title,
+		Description: description,
+	}, nil
+}
+
+// Helper to extract repo full name from event data
+func getRepoFullName(eventData map[string]interface{}) string {
+	if repoData, ok := eventData["repository"].(map[string]interface{}); ok {
+		if fullName, ok := repoData["full_name"].(string); ok {
+			return fullName
+		}
+	}
+	return ""
+}
+
+// Helper to split the repo full name into owner and repo
+func splitRepoFullName(fullName string) (string, string, error) {
+	parts := strings.Split(fullName, "/")
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("invalid repository full name: %s", fullName)
+	}
+	return parts[0], parts[1], nil
+}
+
+// Helper to extract PR title and description
+func getPRTitleAndDescription(eventData map[string]interface{}) (string, string) {
+	if pullRequest, ok := eventData["pull_request"].(map[string]interface{}); ok {
+		title := ""
+		description := ""
+		if t, ok := pullRequest["title"].(string); ok {
+			title = t
+		}
+		if d, ok := pullRequest["body"].(string); ok {
+			description = d
+		}
+		return title, description
+	}
+	return "No Title", "No Description"
 }
 
 func getDiff(owner, repo string, pullNumber int, githubToken string) (string, error) {
@@ -234,13 +319,13 @@ func main() {
 		return
 	}
 
-	prDetails, err := getPRDetails()
+	prDetails, err := GetPRDetails()
 	if err != nil {
-		fmt.Println("Error fetching PR details:", err)
+		fmt.Printf("Error retrieving PR details: %v\n", err)
 		return
 	}
 
-	fmt.Println(prDetails)
+	fmt.Printf("PR Details: %+v\n", prDetails)
 
 	//diff, err := getDiff(prDetails.Owner, prDetails.Repo, prDetails.PullNumber, githubToken)
 	//if err != nil {
