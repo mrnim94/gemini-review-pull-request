@@ -167,17 +167,16 @@ func analyzeCodeUsingGemini(parsedFiles []ParsedFile, title, description, gemini
 						switch p := part.(type) {
 						case genai.Text:
 							// Handle text content
-							fullText += p
+							fullText += string(p)
 						case genai.FunctionCall:
 							// Handle function call
 							fullText += fmt.Sprintf("[Function call: %s]", p.Name)
 						case genai.ExecutableCode:
 							// Handle executable code
-							// Handle text content by accessing the field or method that contains the string
-							fullText += p.Text // Replace "Text" with the actual field or method fmt.Sprintf("[Code: %s]", p.Code)
+							fullText += fmt.Sprintf("[Code: %s]", p.Code)
 						case genai.CodeExecutionResult:
 							// Handle code execution results
-							fullText += fmt.Sprintf("[Execution result: %s]", p.Result)
+							fullText += fmt.Sprintf("[Execution result: Outcome=%s, Output=%s]", p.Outcome, p.Output)
 						default:
 							fmt.Printf("Unhandled part type: %T\n", part)
 						}
