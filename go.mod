@@ -3,7 +3,7 @@ module gemini-review-pull-request
 go 1.21
 
 require (
-	github.com/google/go-github/v50 v50.2.0
+	github.com/google/go-github/v68 v68.0.0
 	golang.org/x/oauth2 v0.21.0
 )
 
