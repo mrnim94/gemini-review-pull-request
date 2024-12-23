@@ -202,6 +202,10 @@ func postReviewComments(owner, repo string, pullNumber int, comments []Comment, 
 		"comments": comments,
 	})
 
+	// Log the URL and payload for debugging
+	fmt.Printf("Request URL: %s\n", url)
+	fmt.Printf("Request Body: %s\n", string(requestBody))
+
 	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(requestBody))
 	req.Header.Set("Authorization", "Bearer "+githubToken)
 	req.Header.Set("Content-Type", "application/json")
