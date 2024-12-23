@@ -2,13 +2,16 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
+	"strings"
 
-	"github.com/gemini-ai/gemini-sdk-go/gemini"
+	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/api/option"
 )
 
 type PRDetails struct {
@@ -23,6 +26,17 @@ type Comment struct {
 	Path     string `json:"path"`
 	Position int    `json:"position"`
 	Body     string `json:"body"`
+}
+
+type Hunk struct {
+	Header  string
+	Content string
+	Lines   []string
+}
+
+type ParsedFile struct {
+	Path  string
+	Hunks []Hunk
 }
 
 func getPRDetails() (*PRDetails, error) {
@@ -60,33 +74,124 @@ func getDiff(owner, repo string, pullNumber int, githubToken string) (string, er
 	return string(body), nil
 }
 
-func analyzeCodeUsingGemini(diff, title, description, geminiApiKey string) ([]Comment, error) {
-	client := gemini.NewClient(geminiApiKey)
-	analysisRequest := &gemini.AnalysisRequest{
-		Title:       title,
-		Description: description,
-		Diff:        diff,
-		Tasks: []string{
-			"Refactor the code for better structure and readability.",
-			"Suggest improvements to enhance performance and maintainability.",
-			"Inspect for CVEs and other potential security vulnerabilities. Provide fixes if necessary.",
-		},
+func parseDiff(diff string) ([]ParsedFile, error) {
+	var files []ParsedFile
+	var currentFile *ParsedFile
+	var currentHunk *Hunk
+
+	lines := strings.Split(diff, "\n")
+	for _, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "diff --git"):
+			if currentFile != nil {
+				files = append(files, *currentFile)
+			}
+			currentFile = &ParsedFile{}
+
+		case strings.HasPrefix(line, "--- a/"):
+			if currentFile != nil {
+				currentFile.Path = strings.TrimPrefix(line, "--- a/")
+			}
+
+		case strings.HasPrefix(line, "+++ b/"):
+			if currentFile != nil {
+				currentFile.Path = strings.TrimPrefix(line, "+++ b/")
+			}
+
+		case strings.HasPrefix(line, "@@"):
+			if currentFile != nil {
+				if currentHunk != nil {
+					currentFile.Hunks = append(currentFile.Hunks, *currentHunk)
+				}
+				currentHunk = &Hunk{Header: line}
+			}
+
+		default:
+			if currentHunk != nil {
+				currentHunk.Lines = append(currentHunk.Lines, line)
+				currentHunk.Content += line + "\n"
+			}
+		}
+	}
+	if currentFile != nil {
+		files = append(files, *currentFile)
+	}
+	return files, nil
+}
+
+func createPrompt(file ParsedFile, hunk Hunk, title, description string) string {
+	return fmt.Sprintf(`
+Your task is to review pull requests. Instructions:
+- Provide comments and suggestions ONLY if there is something to improve.
+- Focus on bugs, security issues, and performance problems.
+- Avoid generic comments and highlight critical issues.
+
+File: %s
+Pull Request Title: %s
+Pull Request Description: %s
+
+Diff Context:
+%s
+`, file.Path, title, description, hunk.Content)
+}
+
+func analyzeCodeUsingGemini(parsedFiles []ParsedFile, title, description, geminiApiKey string) ([]Comment, error) {
+	modelName := os.Getenv("GEMINI_MODEL")
+	if modelName == "" {
+		modelName = "gemini-1.5-flash-002"
 	}
 
-	analysisResponse, err := client.AnalyzeCode(analysisRequest)
+	ctx := context.Background()
+	client, err := genai.NewClient(ctx, option.WithAPIKey(geminiApiKey))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create Gemini client: %v", err)
 	}
+	defer client.Close()
 
+	model := client.GenerativeModel(modelName)
 	var comments []Comment
-	for _, feedback := range analysisResponse.Feedbacks {
-		comments = append(comments, Comment{
-			Path:     feedback.Path,
-			Position: feedback.Position,
-			Body:     feedback.Comment,
-		})
-	}
 
+	for _, file := range parsedFiles {
+		for _, hunk := range file.Hunks {
+			prompt := createPrompt(file, hunk, title, description)
+
+			response, err := model.GenerateContent(ctx, genai.Text(prompt))
+			if err != nil {
+				return nil, fmt.Errorf("error analyzing code with Gemini: %v", err)
+			}
+
+			for _, candidate := range response.Candidates {
+				if candidate.Content != nil {
+					var fullText string
+					for _, part := range candidate.Content.Parts {
+						switch p := part.(type) {
+						case genai.Text:
+							// Handle text content
+							fullText += p
+						case genai.FunctionCall:
+							// Handle function call
+							fullText += fmt.Sprintf("[Function call: %s]", p.Name)
+						case genai.ExecutableCode:
+							// Handle executable code
+							// Handle text content by accessing the field or method that contains the string
+							fullText += p.Text // Replace "Text" with the actual field or method fmt.Sprintf("[Code: %s]", p.Code)
+						case genai.CodeExecutionResult:
+							// Handle code execution results
+							fullText += fmt.Sprintf("[Execution result: %s]", p.Result)
+						default:
+							fmt.Printf("Unhandled part type: %T\n", part)
+						}
+					}
+
+					comments = append(comments, Comment{
+						Path:     file.Path,
+						Position: 0, // Adjust based on the hunk line
+						Body:     fullText,
+					})
+				}
+			}
+		}
+	}
 	return comments, nil
 }
 
@@ -138,7 +243,13 @@ func main() {
 		return
 	}
 
-	comments, err := analyzeCodeUsingGemini(diff, prDetails.Title, prDetails.Description, geminiApiKey)
+	parsedFiles, err := parseDiff(diff)
+	if err != nil {
+		fmt.Println("Error parsing diff:", err)
+		return
+	}
+
+	comments, err := analyzeCodeUsingGemini(parsedFiles, prDetails.Title, prDetails.Description, geminiApiKey)
 	if err != nil {
 		fmt.Println("Error analyzing code:", err)
 		return
